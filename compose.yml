@@ -1,0 +1,74 @@
+services:
+  caddy:
+    build: edge/caddy
+    container_name: giverny-caddy
+    restart: unless-stopped
+    environment:
+      - GIVERNY_BASIC_AUTH_USER
+      - GIVERNY_BASIC_AUTH_HASH
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge, apps]
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.3.0@sha256:6b599ca3e974349ead3286d178da61d291961182ec3fe9c505e1dd02c8ac31b0
+    container_name: giverny-cloudflared
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on: [caddy]
+    networks: [edge]
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0@sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+    container_name: giverny-docker-proxy
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1
+      - NETWORKS=1
+      - IMAGES=1
+      - VOLUMES=1
+      - SERVICES=1
+      - TASKS=1
+      - INFO=1
+      - VERSION=1
+      - BUILD=1
+      - EXEC=1
+      - POST=1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [docker_proxy]
+
+  daemon:
+    build:
+      context: .
+      dockerfile: edge/daemon/Dockerfile
+    container_name: giverny-daemon
+    restart: unless-stopped
+    environment:
+      - GITHUB_TOKEN
+      - GITHUB_WEBHOOK_SECRET
+      - GIVERNY_API_TOKEN
+      - DOCKER_HOST=tcp://docker-proxy:2375
+    volumes:
+      - ./giverny.toml:/giverny/giverny.toml:ro
+      - ./services:/giverny/services
+    depends_on: [docker-proxy]
+    networks: [edge, apps, docker_proxy]
+
+networks:
+  edge:
+    name: giverny_edge
+    driver: bridge
+  apps:
+    name: giverny_apps
+    driver: bridge
+    internal: true
+  docker_proxy:
+    name: giverny_docker_proxy
+    driver: bridge
+    internal: true
+
+volumes:
+  caddy_data:
+  caddy_config:

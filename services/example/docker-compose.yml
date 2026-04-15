@@ -1,0 +1,11 @@
+services:
+  web:
+    build: ./web
+    expose:
+      - "80"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: giverny_apps
+    external: true

@@ -1,0 +1,17 @@
+[project]
+name = "giverny"
+version = "0.1.0"
+description = "Self-hosted multi-project container platform with Cloudflare Tunnel."
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["giverny*"]

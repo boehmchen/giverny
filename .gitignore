@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+build/
+.env
+giverny.toml.local
+
+# Per-project runtime state (protected flag, idle timeout, link + hook_id).
+services/*/.giverny.json
+

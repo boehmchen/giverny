@@ -1,0 +1,3 @@
+root_domain = "boehme.dev"
+poll_interval_seconds = 5
+default_idle_timeout_minutes = 10

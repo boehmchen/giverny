@@ -1,0 +1,13 @@
+services:
+  web:
+    build: ./web
+    expose:
+      - "3000"
+    environment:
+      - GIVERNY_API_TOKEN
+    restart: unless-stopped
+
+networks:
+  default:
+    name: giverny_apps
+    external: true
