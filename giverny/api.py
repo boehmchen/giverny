@@ -91,8 +91,44 @@ def build_app(config: Config, daemon: "Daemon | None" = None) -> FastAPI:
                 "suspended": suspended,
                 "link": p.link,
                 "services": services,
+                "build": daemon.build_status(p.name) if daemon else None,
             })
         return out
+
+    @app.get("/api/projects/{name}/build-log", dependencies=[Depends(_require_token)])
+    def build_log(name: str):
+        _check_name(name)
+        if daemon is None:
+            raise HTTPException(status_code=500, detail="daemon not wired")
+        return {"lines": daemon.build_log(name)}
+
+    @app.get("/api/projects/{name}/services/{service}/log",
+             dependencies=[Depends(_require_token)])
+    def service_log(name: str, service: str, tail: int = 500):
+        _check_name(service)
+        p = _project(name)
+        tail = max(1, min(2000, int(tail)))
+        result = subprocess.run(
+            ["docker", "compose", "-p", p.name, "-f", str(p.compose_file),
+             "logs", "--no-color", f"--tail={tail}", service],
+            capture_output=True, text=True, check=False,
+        )
+        lines = (result.stdout or "").splitlines()
+        if result.returncode != 0 and result.stderr:
+            lines.append(f"[stderr] {result.stderr.strip()}")
+        return {"lines": lines}
+
+    @app.post("/api/projects/{name}/rebuild", dependencies=[Depends(_require_token)])
+    def rebuild(name: str):
+        p = _project(name)
+        if not p.link:
+            raise HTTPException(status_code=400, detail="project is not linked")
+        if daemon is None:
+            raise HTTPException(status_code=500, detail="daemon not wired")
+        started = daemon.rebuild(name)
+        if not started:
+            raise HTTPException(status_code=409, detail="build already in progress")
+        return {"ok": True}
 
     @app.post("/api/projects/{name}/idle-timeout", dependencies=[Depends(_require_token)])
     def set_idle_timeout(name: str, payload: dict):
@@ -215,11 +251,9 @@ def build_app(config: Config, daemon: "Daemon | None" = None) -> FastAPI:
             return {"ok": True, "ignored": f"ref {ref}"}
 
         log.info("webhook pull %s", name)
-        git.fetch_reset(config.services_dir / name, p.link["repo"], p.link["branch"])
-        subprocess.run(
-            ["docker", "compose", "-p", p.name, "-f", str(p.compose_file), "up", "-d", "--build"],
-            check=False,
-        )
+        if daemon is None:
+            raise HTTPException(status_code=500, detail="daemon not wired")
+        daemon.rebuild(name)
         return {"ok": True, "deployed": name}
 
     return app

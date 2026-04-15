@@ -51,11 +51,16 @@ def load_project(project_dir: Path, default_idle_timeout_minutes: int = 10) -> P
     idle = s.idle_timeout_minutes if s.idle_timeout_minutes is not None else default_idle_timeout_minutes
     idle = max(0, min(1440, idle))
 
+    # Projects are protected by default until the user explicitly toggles
+    # them off from the dashboard UI (which writes state).
+    state_file_exists = (project_dir / project_state.STATE_FILE).exists()
+    protected = s.protected if state_file_exists else True
+
     return Project(
         name=project_dir.name,
         compose_file=compose_file,
         web_port=int(str(expose[0]).split("/", 1)[0]),
-        protected=s.protected,
+        protected=protected,
         idle_timeout_minutes=idle,
         link=s.link,
     )

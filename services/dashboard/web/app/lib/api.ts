@@ -13,6 +13,14 @@ export type Service = {
 
 export type Link = { repo: string; branch: string };
 
+export type BuildState = {
+  status: "idle" | "building" | "ok" | "error";
+  started_at: number | null;
+  finished_at: number | null;
+  error: string | null;
+  duration_s: number | null;
+};
+
 export type Project = {
   name: string;
   hostname: string;
@@ -22,6 +30,7 @@ export type Project = {
   suspended: boolean;
   link: Link | null;
   services: Service[];
+  build: BuildState | null;
 };
 
 export async function listProjects(): Promise<Project[]> {
@@ -44,6 +53,20 @@ export async function post(path: string, body?: unknown): Promise<void> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`${path} ${res.status} ${text}`);
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.detail === "string") detail = parsed.detail;
+    } catch {}
+    throw new Error(detail || `${res.status}`);
   }
+}
+
+export async function getJson<T>(path: string): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    cache: "no-store",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  return res.json();
 }

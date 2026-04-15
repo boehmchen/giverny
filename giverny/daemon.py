@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import logging
 import signal
+import subprocess
 import threading
 import time
+from collections import deque
+from typing import Deque
 
-from . import api, compose, dockerapi, edge
+from . import api, compose, dockerapi, edge, git
 from .config import Config
-from .discovery import Project, discover
+from .discovery import Project, discover, load_project
+
+BUILD_LOG_MAX_LINES = 2000
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +27,10 @@ class Daemon:
         self._lock = threading.Lock()
         # one per project, to serialize compose.up against itself
         self._wake_locks: dict[str, threading.Lock] = {}
+        # build tracking — status is "idle"|"building"|"ok"|"error"
+        self._build_state: dict[str, dict] = {}
+        self._build_logs: dict[str, Deque[str]] = {}
+        self._build_locks: dict[str, threading.Lock] = {}
 
     def stop(self, *_: object) -> None:
         self._running = False
@@ -49,6 +58,86 @@ class Daemon:
             compose.up(name, p.compose_file)
             with self._lock:
                 self._net_stats.pop(name, None)
+
+    def rebuild(self, name: str) -> bool:
+        """Kick off an async git pull + docker compose up --build for a linked
+        project. Returns False if a build is already running."""
+        p = self._known.get(name) or self._load(name)
+        if p is None or not p.link:
+            return False
+        link: dict = p.link
+        with self._lock:
+            bl = self._build_locks.setdefault(name, threading.Lock())
+        if not bl.acquire(blocking=False):
+            return False
+
+        logs: Deque[str] = deque(maxlen=BUILD_LOG_MAX_LINES)
+        started = time.time()
+        with self._lock:
+            self._build_logs[name] = logs
+            self._build_state[name] = {
+                "status": "building",
+                "started_at": started,
+                "finished_at": None,
+                "error": None,
+                "duration_s": None,
+            }
+
+        def _run() -> None:
+            try:
+                logs.append(f"$ git fetch origin {link['branch']}")
+                git.fetch_reset(self.config.services_dir / name, link["repo"], link["branch"])
+                logs.append("$ docker compose up -d --build")
+                proc = subprocess.Popen(
+                    ["docker", "compose", "-p", name, "-f", str(p.compose_file),
+                     "up", "-d", "--build"],
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, bufsize=1,
+                )
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    logs.append(line.rstrip("\n"))
+                rc = proc.wait()
+                ok = rc == 0
+                err = None if ok else f"docker compose exited {rc}"
+            except subprocess.CalledProcessError as exc:
+                ok = False
+                err = (exc.stderr or b"").decode(errors="replace")[-2000:] or str(exc)
+                logs.append(err)
+            except Exception as exc:
+                ok = False
+                err = f"{type(exc).__name__}: {exc}"
+                logs.append(err)
+            finished = time.time()
+            with self._lock:
+                self._build_state[name] = {
+                    "status": "ok" if ok else "error",
+                    "started_at": started,
+                    "finished_at": finished,
+                    "error": err,
+                    "duration_s": finished - started,
+                }
+            bl.release()
+
+        threading.Thread(target=_run, daemon=True, name=f"build-{name}").start()
+        return True
+
+    def build_status(self, name: str) -> dict | None:
+        with self._lock:
+            s = self._build_state.get(name)
+            return dict(s) if s else None
+
+    def build_log(self, name: str) -> list[str]:
+        with self._lock:
+            logs = self._build_logs.get(name)
+            return list(logs) if logs else []
+
+    def _load(self, name: str) -> Project | None:
+        try:
+            return load_project(self.config.services_dir / name,
+                                self.config.default_idle_timeout_minutes)
+        except Exception:
+            return None
 
     def tick(self) -> None:
         current = {p.name: p for p in discover(self.config.services_dir,

@@ -71,22 +71,18 @@ On every push to the tracked branch, giverny runs
 
 ## Protecting a project
 
-To require HTTP basic auth on a project, drop an empty marker file:
-
-```
-touch services/<project>/.protected
-```
-
-Caddy will wrap that project's route in `basicauth` using the shared
-credentials from `.env` (`GIVERNY_BASIC_AUTH_USER` +
+Toggle HTTP basic auth per project from the dashboard. The setting is
+persisted in `services/<project>/.giverny.json` and caddy reloads
+automatically, wrapping that project's route in `basicauth` using the
+shared credentials from `.env` (`GIVERNY_BASIC_AUTH_USER` +
 `GIVERNY_BASIC_AUTH_HASH`). To set or change the password:
 
 ```
 ./set-password
 ```
 
-This prompts, hashes, updates `.env`, and reloads caddy. The dashboard
-ships with `.protected` set by default.
+This prompts, hashes, updates `.env`, and reloads caddy. All projects
+are protected by default until you disable protection from the dashboard.
 
 ## Architecture
 
